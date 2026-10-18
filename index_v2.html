@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Open Base Charting</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    #selector { position: absolute; top: 10px; right: 10px; z-index: 1000; padding: 6px; background: #fff; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <select id="selector">
+    <option value="osm">OpenStreetMap</option>
+    <option value="satellite">Satellite</option>
+    <option value="ocean">Oceans</option>
+  </select>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const layers = {
+      osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }),
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri'
+      }),
+      ocean: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 13,
+        attribution: 'Tiles &copy; Esri, GEBCO, NOAA'
+      })
+    };
+
+    const map = L.map('map', { center: [20, 0], zoom: 3, layers: [layers.osm] });
+    let current = layers.osm;
+    let depthRequestId = 0;
+    let depthCallbackId = 0;
+
+    function requestOceanAltitude(lat, lng) {
+      return new Promise((resolve, reject) => {
+        const callbackName = `oceanDepthCallback${++depthCallbackId}`;
+        const script = document.createElement('script');
+        const query = `altitude[(${lat})][(${lng})]`;
+        const timeoutId = setTimeout(() => {
+          cleanup();
+          reject(new Error('NOAA request timed out'));
+        }, 10000);
+
+        function cleanup() {
+          clearTimeout(timeoutId);
+          script.remove();
+          delete window[callbackName];
+        }
+
+        window[callbackName] = result => {
+          cleanup();
+          resolve(result.table?.rows?.[0]?.[2]);
+        };
+        script.onerror = () => {
+          cleanup();
+          reject(new Error('Unable to load the NOAA depth response'));
+        };
+        script.src = `https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.json?${encodeURIComponent(query)}&.jsonp=${callbackName}`;
+        document.head.appendChild(script);
+      });
+    }
+
+    map.on('click', async e => {
+      const requestId = ++depthRequestId;
+      const { lat, lng } = e.latlng;
+      const popup = L.popup()
+        .setLatLng(e.latlng)
+        .setContent(`Latitude: ${lat.toFixed(6)}<br>Longitude: ${lng.toFixed(6)}`)
+        .openOn(map);
+
+      if (current !== layers.ocean) return;
+
+      popup.setContent(`Latitude: ${lat.toFixed(6)}<br>Longitude: ${lng.toFixed(6)}<br>Depth: Loading...`);
+
+      const normalizedLng = ((lng + 180) % 360 + 360) % 360 - 180;
+
+      try {
+        let altitude;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            altitude = await requestOceanAltitude(lat, normalizedLng);
+            break;
+          } catch (error) {
+            if (attempt === 2) throw error;
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+          }
+        }
+
+        if (requestId !== depthRequestId || !map.hasLayer(layers.ocean)) return;
+
+        const depth = Number(altitude);
+        const depthText = Number.isFinite(depth) && depth < 0
+          ? `Depth: ${Math.abs(depth).toLocaleString()} m (NOAA ETOPO1 estimate)`
+          : 'Depth: Not available at this location';
+        popup.setContent(`Latitude: ${lat.toFixed(6)}<br>Longitude: ${lng.toFixed(6)}<br>${depthText}`);
+      } catch (error) {
+        console.error('Unable to retrieve ocean depth from NOAA ETOPO1:', error);
+        if (requestId === depthRequestId && map.hasLayer(layers.ocean)) {
+          popup.setContent(`Latitude: ${lat.toFixed(6)}<br>Longitude: ${lng.toFixed(6)}<br>Depth: Unavailable (NOAA request failed)`);
+        }
+      }
+    });
+
+    document.getElementById('selector').addEventListener('change', e => {
+      depthRequestId++;
+      map.closePopup();
+      map.removeLayer(current);
+      current = layers[e.target.value];
+      current.addTo(map);
+    });
+  </script>
+</body>
+</html>

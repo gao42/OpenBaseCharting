@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Open Base Charting</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    #selector { position: absolute; top: 10px; right: 10px; z-index: 1000; padding: 6px; background: #fff; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <select id="selector">
+    <option value="osm">OpenStreetMap</option>
+    <option value="satellite">Satellite</option>
+    <option value="ocean">Ocean Depth</option>
+  </select>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const layers = {
+      osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }),
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19,
+        attribution: 'Tiles &copy; Esri'
+      }),
+      ocean: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 13,
+        attribution: 'Tiles &copy; Esri, GEBCO, NOAA'
+      })
+    };
+
+    const map = L.map('map', { center: [20, 0], zoom: 3, layers: [layers.osm] });
+    let current = layers.osm;
+
+    document.getElementById('selector').addEventListener('change', e => {
+      map.removeLayer(current);
+      current = layers[e.target.value];
+      current.addTo(map);
+    });
+  </script>
+</body>
+</html>
